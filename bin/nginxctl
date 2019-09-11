@@ -2,23 +2,13 @@
 
 die() { echo "$@"; exit 1; }
 
-list() {
-	if ! echo "${1}" | grep -q -E '^(available|enabled)$'; then
-		die "usage: nginxctl list <available|enabled>"
-	fi
+list_enabled_sites()   { ls -1 "/etc/nginx/sites-enabled/";   }
+list_available_sites() { ls -1 "/etc/nginx/sites-available/"; }
 
-	ls -1 "/etc/nginx/sites-${1}"
-}
+enable_site() {
+	readonly SITE="${1}"
 
-enable() {
-	if [ ! "${1}" ]; then
-		die "usage: nginxctl enable <site>"
-	fi
-
-	SITE="${1}"
-	if [ ! -f "/etc/nginx/sites-available/${SITE}" ]; then
-		die "unknown site: ${SITE}"
-	fi
+	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
 
 	set -eux
 	ln -f -s "/etc/nginx/sites-available/${SITE}" "/etc/nginx/sites-enabled/${SITE}"
@@ -26,15 +16,10 @@ enable() {
 	systemctl reload nginx
 }
 
-disable() {
-	if [ ! "${1}" ]; then
-		die "usage: nginxctl disable <site>"
-	fi
+disable_site() {
+	readonly SITE="${1}"
 
-	SITE="${1}"
-	if [ ! -f "/etc/nginx/sites-available/${SITE}" ]; then
-		die "unknown site: ${SITE}"
-	fi
+	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
 
 	set -eux
 	rm -f "/etc/nginx/sites-enabled/${SITE}"
@@ -42,21 +27,23 @@ disable() {
 	systemctl reload nginx
 }
 
-if [ ! "${1}" ]; then
-	die "usage: nginxctl <command> <args>"
-fi
 
-COMMAND="${1}"; shift
+test "${1}" || die "usage: nginxctl <command> <args>"
+readonly COMMAND="${1}"; shift
 
 case "${COMMAND}" in
-	list)
-		list $@
+	list-available-sites|list-enabled-sites)
+		$(echo ${COMMAND} | tr - _) $@
 		;;
-	enable)
-		enable $@
+	enable-site|disable-site)
+		test "${1}" || die "usage: nginxctl ${COMMAND} <site>"
+		test $(id -u) -eq 0 || die "must be root"
+		$(echo ${COMMAND} | tr - _) $@
 		;;
-	disable)
-		disable $@
+	list-users)
+		test "${1}" || die "usage: nginxctl ${COMMAND} <site>"
+		test $(id -u) -eq 0 || die "must be root"
+		$(echo ${COMMAND} | tr - _) $@
 		;;
 	list-users|add-user|remove-user|change-user-password|change-user-name)
 		die "not currently implemented: ${COMMAND}"
