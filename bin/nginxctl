@@ -61,6 +61,9 @@ case "${COMMAND}" in
 	disable)
 		disable $@
 		;;
+	list-users|add-user|remove-user|change-user-password|change-user-name)
+		die "not currently implemented: ${COMMAND}"
+		;;
 	*)
 		die "unknown command: ${COMMAND}"
 		;;
