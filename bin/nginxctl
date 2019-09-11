@@ -27,6 +27,39 @@ disable_site() {
 	systemctl reload nginx
 }
 
+list_users() {
+	readonly SITE="${1}"
+
+	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
+	test -f "/etc/nginx/htpasswd/${SITE}"        || die "no authentication set up: ${SITE}"
+
+	cat "/etc/nginx/htpasswd/${SITE}" | grep -v -E '^#' | cut -d: -f1
+}
+
+add_user() {
+	readonly SITE="${1}"
+	readonly USER="${2}"
+
+	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
+
+	if [ -f "/etc/nginx/htpasswd/${SITE}" ] && grep -q -E "^${USER}:" "/etc/nginx/htpasswd/${SITE}"; then
+		die "user already exists: ${USER}"
+	fi
+
+	readonly PASSWORD="$(openssl passwd -apr1)"
+
+	echo "${USER}:${PASSWORD}" >> "/etc/nginx/htpasswd/${SITE}"
+}
+
+remove_user() {
+	readonly SITE="${1}"
+	readonly USER="${2}"
+
+	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
+
+	test ! -f "/etc/nginx/htpasswd/${SITE}" && return
+	sed -i "/^${USER}:/d" "/etc/nginx/htpasswd/${SITE}"
+}
 
 test "${1}" || die "usage: nginxctl <command> <args>"
 readonly COMMAND="${1}"; shift
@@ -45,8 +78,10 @@ case "${COMMAND}" in
 		test $(id -u) -eq 0 || die "must be root"
 		$(echo ${COMMAND} | tr - _) $@
 		;;
-	list-users|add-user|remove-user|change-user-password|change-user-name)
-		die "not currently implemented: ${COMMAND}"
+	add-user|remove-user)
+		test "${1}" -a "${2}" || die "usage: nginxctl ${COMMAND} <site> <user>"
+		test $(id -u) -eq 0 || die "must be root"
+		$(echo ${COMMAND} | tr - _) $@
 		;;
 	*)
 		die "unknown command: ${COMMAND}"
