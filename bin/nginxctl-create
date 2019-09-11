@@ -1,0 +1,56 @@
+#!/bin/sh
+
+die() { echo "$@"; exit 1; }
+
+manual() {
+	echo "$@"
+	while true; do
+		read -p "done? [y/n] " DONE
+		case "${DONE}" in
+			[yY]) echo; break ;;
+			[nN]) exit 1 ;;
+			*) ;;
+		esac
+	done
+}
+
+if [ ! "${1}" ]; then
+	die "usage: nginxctl-create <site>"
+fi
+
+SITE="${1}"; shift
+
+
+manual "go to Gandi.net, and create A and AAAA records for ${SITE}."
+
+manual "wait to ping ${SITE}."
+
+
+# automation begins.
+set -eux
+
+mkdir "/var/www/${SITE}"
+
+cat <<EOF # > "/etc/nginx/sites-available/${SITE}"
+server {
+	server_name ${SITE}
+	include snippets/server.http-static.conf
+}
+EOF
+nginxctl enable "${SITE}"
+
+certbot certonly -a webroot --webroot-path="/var/www/${SITE}" -d "${SITE}" -d "${SITE}"
+
+cat <<EOF > "/etc/nginx/sites-available/${SITE}"
+server {
+	server_name ${SITE}
+	include snippets/server.http-to-https.conf
+}
+server {
+	server_name ${SITE}
+	include snippets/server.https-static.conf
+	ssl_certificate /etc/letsencrypt/live/${SITE}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/${SITE}/privkey.pem;
+}
+EOF
+nginxctl enable "${SITE}"
