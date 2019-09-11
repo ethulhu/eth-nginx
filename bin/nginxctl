@@ -1,0 +1,67 @@
+#!/bin/sh
+
+die() {
+	echo "$@"
+	exit 1
+}
+
+list() {
+	if ! echo "${1}" | grep -q -E '^(available|enabled)$'; then
+		die "usage: nginxctl list <available|enabled>"
+	fi
+
+	ls -1 "/etc/nginx/sites-${1}"
+}
+
+enable() {
+	if [ ! "${1}" ]; then
+		die "usage: nginxctl enable <site>"
+	fi
+
+	SITE="${1}"
+	if [ ! -f "/etc/nginx/sites-available/${SITE}" ]; then
+		die "unknown site: ${SITE}"
+	fi
+
+	set -eux
+	ln -f -s "/etc/nginx/sites-available/${SITE}" "/etc/nginx/sites-enabled/${SITE}"
+	nginx -t
+	systemctl reload nginx
+}
+
+disable() {
+	if [ ! "${1}" ]; then
+		die "usage: nginxctl disable <site>"
+	fi
+
+	SITE="${1}"
+	if [ ! -f "/etc/nginx/sites-available/${SITE}" ]; then
+		die "unknown site: ${SITE}"
+	fi
+
+	set -eux
+	rm -f "/etc/nginx/sites-enabled/${SITE}"
+	nginx -t
+	systemctl reload nginx
+}
+
+if [ ! "${1}" ]; then
+	die "usage: nginxctl <command> <args>"
+fi
+
+COMMAND="${1}"; shift
+
+case "${COMMAND}" in
+	list)
+		list $@
+		;;
+	enable)
+		enable $@
+		;;
+	disable)
+		disable $@
+		;;
+	*)
+		die "unknown command: ${COMMAND}"
+		;;
+esac
