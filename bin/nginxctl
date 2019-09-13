@@ -1,89 +1,226 @@
-#!/bin/sh
+#!/usr/bin/env python3
+"""high-level nginx control utility."""
 
-die() { echo "$@"; exit 1; }
+from os import path
+import argparse
+import functools
+import inspect
+import os
+import subprocess
+import sys
+import textwrap
 
-list_enabled_sites()   { ls -1 "/etc/nginx/sites-enabled/";   }
-list_available_sites() { ls -1 "/etc/nginx/sites-available/"; }
+from typing import List
 
-enable_site() {
-	readonly SITE="${1}"
+HTDOCS = '/var/www'
+HTPASSWD = '/etc/nginx/htpasswd'
+SITES_AVAILABLE = '/etc/nginx/sites-available'
+SITES_ENABLED = '/etc/nginx/sites-enabled'
 
-	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
+COMMANDS = []
 
-	set -eux
-	ln -f -s "/etc/nginx/sites-available/${SITE}" "/etc/nginx/sites-enabled/${SITE}"
-	nginx -t
-	systemctl reload nginx
-}
 
-disable_site() {
-	readonly SITE="${1}"
+def command(func):
+    COMMANDS.append(func)
+    return func
 
-	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
 
-	set -eux
-	rm -f "/etc/nginx/sites-enabled/${SITE}"
-	nginx -t
-	systemctl reload nginx
-}
+class MustBeRootException(Exception):
+    """you should be root, but you're not :("""
+    pass
 
-list_users() {
-	readonly SITE="${1}"
 
-	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
-	test -f "/etc/nginx/htpasswd/${SITE}"        || die "no authentication set up: ${SITE}"
+def must_be_root(func):
+    @functools.wraps(func)
+    def check_root_first(*args, **kwargs):
+        if os.geteuid() != 0:
+            raise MustBeRootException()
+        func(*args, **kwargs)
+    return check_root_first
 
-	cat "/etc/nginx/htpasswd/${SITE}" | grep -v -E '^#' | cut -d: -f1
-}
 
-add_user() {
-	readonly SITE="${1}"
-	readonly USER="${2}"
+def print_sorted(xs: List[str]):
+    for x in sorted(xs):
+        print(x)
 
-	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
 
-	if [ -f "/etc/nginx/htpasswd/${SITE}" ] && grep -q -E "^${USER}:" "/etc/nginx/htpasswd/${SITE}"; then
-		die "user already exists: ${USER}"
-	fi
+def manual(action: str):
+    print(action)
+    while input('done? [y/n] ') != 'y':
+        pass
 
-	readonly PASSWORD="$(openssl passwd -apr1)"
 
-	echo "${USER}:${PASSWORD}" >> "/etc/nginx/htpasswd/${SITE}"
-}
+# types.
 
-remove_user() {
-	readonly SITE="${1}"
-	readonly USER="${2}"
 
-	test -f "/etc/nginx/sites-available/${SITE}" || die "unknown site: ${SITE}"
+def Site(value: str) -> str:
+    if not path.isfile(path.join(SITES_AVAILABLE, value)):
+        raise argparse.ArgumentTypeError(f'unknown site: {value}')
+    return value
 
-	test ! -f "/etc/nginx/htpasswd/${SITE}" && return
-	sed -i "/^${USER}:/d" "/etc/nginx/htpasswd/${SITE}"
-}
 
-test "${1}" || die "usage: nginxctl <command> <args>"
-readonly COMMAND="${1}"; shift
+def User(value: str) -> str:
+    if not value.isalpha():
+        raise argparse.ArgumentTypeError(f'users can only be latin characters: {value}')
+    return value
 
-case "${COMMAND}" in
-	list-available-sites|list-enabled-sites)
-		$(echo ${COMMAND} | tr - _) $@
-		;;
-	enable-site|disable-site)
-		test "${1}" || die "usage: nginxctl ${COMMAND} <site>"
-		test $(id -u) -eq 0 || die "must be root"
-		$(echo ${COMMAND} | tr - _) $@
-		;;
-	list-users)
-		test "${1}" || die "usage: nginxctl ${COMMAND} <site>"
-		test $(id -u) -eq 0 || die "must be root"
-		$(echo ${COMMAND} | tr - _) $@
-		;;
-	add-user|remove-user)
-		test "${1}" -a "${2}" || die "usage: nginxctl ${COMMAND} <site> <user>"
-		test $(id -u) -eq 0 || die "must be root"
-		$(echo ${COMMAND} | tr - _) $@
-		;;
-	*)
-		die "unknown command: ${COMMAND}"
-		;;
-esac
+
+# commands.
+
+@command
+def list_available_sites():
+    """list available sites."""
+    print_sorted(os.listdir(SITES_AVAILABLE))
+
+
+@command
+def list_enabled_sites():
+    """list enabled sites."""
+    print_sorted(os.listdir(SITES_ENABLED))
+
+
+@command
+@must_be_root
+def enable_site(site: Site):
+    """enable a site."""
+    if not path.isfile(path.join(SITES_ENABLED, site)):
+        os.symlink(path.join(SITES_AVAILABLE, site),
+                   path.join(SITES_ENABLED, site))
+    subprocess.run(['nginx', '-t'], check=True)
+    subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+
+
+@command
+@must_be_root
+def disable_site(site: Site):
+    """disable a site."""
+    if path.isfile(path.join(SITES_ENABLED, site)):
+        os.remove(path.join(SITES_ENABLED, site))
+    subprocess.run(['nginx', '-t'], check=True)
+    subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+
+
+@command
+@must_be_root
+def list_users(site: Site):
+    """list users with access to a site."""
+    with open(path.join(HTPASSWD, site)) as f:
+        for line in f.readlines():
+            if not line.startswith('#'):
+                print(line.split(':')[0])
+
+
+@command
+@must_be_root
+def add_user(site: Site, user: User):
+    """add a user to a site."""
+    if path.isfile(path.join(HTPASSWD, site)):
+        with open(path.join(HTPASSWD, site)) as f:
+            lines = f.readlines()
+            if any(l.startswith(user + ':') for l in lines):
+                raise ValueError(f'user already exists: {user}')
+
+    while True:
+        cmd = subprocess.run(
+            ['openssl', 'passwd', '-apr1'], capture_output=True)
+        if cmd.returncode == 0:
+            password = cmd.stdout.decode('utf-8').strip()
+            break
+
+    with open(path.join(HTPASSWD, site), 'a') as f:
+        print(f'{user}:{password}', file=f)
+
+
+@command
+@must_be_root
+def remove_user(site: Site, user: User):
+    """remove a user from a site."""
+    if not path.isfile(path.join(HTPASSWD, site)):
+        return
+
+    with open(path.join(HTPASSWD, site)) as f:
+        lines = [l.strip() for l in f.readlines()]
+
+    with open(path.join(HTPASSWD, site), 'w') as f:
+        for line in lines:
+            if not line.startswith(f'{user}:'):
+                print(line, file=f)
+
+
+@command
+@must_be_root
+def create(site: str):
+    manual(f'go to Gandi.net, create A and AAAA records for {site}')
+    manual(f'wait for ping {site}')
+
+    os.mkdir(path.join(HTDOCS, site))
+
+    with open(path.join(SITES_AVAILABLE, site), 'w') as f:
+        print(textwrap.dedent('''
+	server {
+		server_name {site}
+		include snippets/server.http-static.conf
+	}
+        ''').strip(), file=f)
+
+    enable_site(site)
+
+    subprocess.run(['certbot', 'certonly', '-a', 'webroot', f'--webroot-path=/var/www/{site}', '-d', site, '-d', site], check=True)
+
+    with open(path.join(SITES_AVAILABLE, site), 'w') as f:
+        print(textwrap.dedent('''
+        server {
+                server_name {site}
+                include snippets/server.http-to-https.conf
+        }
+        server {
+                server_name {site}
+                include snippets/server.https-static.conf
+                ssl_certificate /etc/letsencrypt/live/{site}/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/{site}/privkey.pem;
+        }
+        ''').strip(), file=f)
+
+    enable_site(site)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    subs = parser.add_subparsers()
+
+    for func in COMMANDS:
+        name = func.__name__.replace('_', '-')
+        help = inspect.getdoc(func)
+
+        cmd = subs.add_parser(name, help=help, description=help)
+        cmd.set_defaults(func=func)
+
+        signature = inspect.signature(func)
+        for parameter in signature.parameters.values():
+            if parameter.default == inspect.Parameter.empty:
+                if parameter.annotation == bool:
+                    cmd.add_argument(parameter.name, action='store_true')
+                else:
+                    cmd.add_argument(parameter.name, type=parameter.annotation)
+            else:
+                if parameter.annotation == bool:
+                    action = 'store_false' if parameter.default else 'store_true'
+                    cmd.add_argument('--' + parameter.name, action=action)
+                else:
+                    cmd.add_argument(
+                        '--' + parameter.name, type=parameter.annotation, default=parameter.default)
+
+    args = parser.parse_args()
+
+    if 'func' not in args:
+        parser.print_help()
+    else:
+        try:
+            args.func(*[vars(args)[p]
+                        for p in inspect.signature(args.func).parameters])
+        except MustBeRootException:
+            print('must be root')
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print()
+            pass
