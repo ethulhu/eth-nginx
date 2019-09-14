@@ -6,9 +6,11 @@ import argparse
 import functools
 import inspect
 import os
+import socket
 import subprocess
 import sys
 import textwrap
+import time
 
 from typing import List
 
@@ -153,9 +155,20 @@ def remove_user(site: Site, user: User):
 @must_be_root
 def create(site: str):
     manual(f'go to Gandi.net, create A and AAAA records for {site}')
-    manual(f'wait for ping {site}')
 
-    os.mkdir(path.join(HTDOCS, site))
+    while True:
+        try:
+            print(f'waiting for DNS for {site}... ', end='')
+            socket.gethostbyname(site)
+            print('done.')
+            break
+        except socket.gaierror:
+            print('retry in 10s.')
+            time.sleep(10)
+    print()
+
+    if not path.isdir(path.join(HTDOCS, site)):
+        os.mkdir(path.join(HTDOCS, site))
 
     with open(path.join(SITES_AVAILABLE, site), 'w') as f:
         print(textwrap.dedent('''
