@@ -106,9 +106,10 @@ def disable_site(site: Site):
 def list_users(site: Site):
     """list users with access to a site."""
     with open(path.join(HTPASSWD, site)) as f:
-        for line in f.readlines():
-            if not line.startswith('#'):
-                print(line.split(':')[0])
+        lines = f.readlines()
+        users = [l.split(':')[0]
+                 for l in lines if not l.startswith('#')]
+    print_sorted(users)
 
 
 @command
