@@ -119,7 +119,7 @@ def add_user(site: Site, user: User):
     if path.isfile(path.join(HTPASSWD, site)):
         with open(path.join(HTPASSWD, site)) as f:
             lines = f.readlines()
-            if any(l.startswith(user + ':') for l in lines):
+            if any(l.startswith(f'{user}:') for l in lines):
                 raise ValueError(f'user already exists: {user}')
 
     while True:
