@@ -48,6 +48,7 @@ def manual(action: str):
     print(action)
     while input('done? [y/n] ') != 'y':
         pass
+    print()
 
 
 # types.
