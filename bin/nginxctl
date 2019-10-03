@@ -171,11 +171,11 @@ def create(site: str):
         os.mkdir(path.join(HTDOCS, site))
 
     with open(path.join(SITES_AVAILABLE, site), 'w') as f:
-        print(textwrap.dedent('''
-	server {
-		server_name {site}
-		include snippets/server.http-static.conf
-	}
+        print(textwrap.dedent(f'''
+        server {{
+            server_name {site};
+            include snippets/server.http-static.conf;
+        }}
         ''').strip(), file=f)
 
     enable_site(site)
@@ -183,17 +183,17 @@ def create(site: str):
     subprocess.run(['certbot', 'certonly', '-a', 'webroot', f'--webroot-path=/var/www/{site}', '-d', site, '-d', site], check=True)
 
     with open(path.join(SITES_AVAILABLE, site), 'w') as f:
-        print(textwrap.dedent('''
-        server {
-                server_name {site}
-                include snippets/server.http-to-https.conf
-        }
-        server {
-                server_name {site}
-                include snippets/server.https-static.conf
+        print(textwrap.dedent(f'''
+        server {{
+                server_name {site};
+                include snippets/server.http-to-https.conf;
+        }}
+        server {{
+                server_name {site};
+                include snippets/server.https-static.conf;
                 ssl_certificate /etc/letsencrypt/live/{site}/fullchain.pem;
                 ssl_certificate_key /etc/letsencrypt/live/{site}/privkey.pem;
-        }
+        }}
         ''').strip(), file=f)
 
     enable_site(site)
