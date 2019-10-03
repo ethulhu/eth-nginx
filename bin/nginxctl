@@ -84,13 +84,20 @@ def list_enabled_sites():
 
 @command
 @must_be_root
+def reload_config():
+    """check config safety && reload nginx."""
+    subprocess.run(['nginx', '-t'], check=True)
+    subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+
+
+@command
+@must_be_root
 def enable_site(site: Site):
     """enable a site."""
     if not path.isfile(path.join(SITES_ENABLED, site)):
         os.symlink(path.join(SITES_AVAILABLE, site),
                    path.join(SITES_ENABLED, site))
-    subprocess.run(['nginx', '-t'], check=True)
-    subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+    reload_config()
 
 
 @command
@@ -99,8 +106,7 @@ def disable_site(site: Site):
     """disable a site."""
     if path.isfile(path.join(SITES_ENABLED, site)):
         os.remove(path.join(SITES_ENABLED, site))
-    subprocess.run(['nginx', '-t'], check=True)
-    subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+    reload_config()
 
 
 @command
