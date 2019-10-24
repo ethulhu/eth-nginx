@@ -1,0 +1,10 @@
+Source: eth-nginx
+Package: eth-nginx
+Section: httpd
+Priority: optional
+Architecture: all
+Build-Depends:
+Depends: nginx, python3 (>= 3.7.0)
+Essential: no
+Maintainer: Eth Morgan <eth@ethulhu.co.uk>
+Description: Nginx configuration snippets & automation utilities.
