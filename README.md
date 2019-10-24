@@ -1,3 +1,3 @@
-# nginx
+# eth-nginx
 
-some stuff for my preferred nginx setup.
+Nginx configuration snippets & automation utilities.
