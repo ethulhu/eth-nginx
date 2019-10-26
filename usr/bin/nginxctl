@@ -5,6 +5,7 @@ from os import path
 import argparse
 import functools
 import inspect
+import netifaces
 import os
 import socket
 import subprocess
@@ -52,6 +53,20 @@ def manual(action: str):
         pass
     print()
 
+
+def ip_addrs() -> List[str]:
+    def flatten(xss): return (x for xs in xss for x in xs)
+
+    def conns(links, kind): return flatten(
+        link[kind] for link in links if kind in link)
+
+    def addrs(conns): return [conn['addr'] for conn in conns]
+    links = [netifaces.ifaddresses(link) for link in netifaces.interfaces()]
+
+    ipv4 = addrs(conns(links, netifaces.AF_INET))
+    ipv6 = addrs(conns(links, netifaces.AF_INET6))
+
+    return ipv4 + [ip.split('%')[0] for ip in ipv6]
 
 # types.
 
@@ -160,18 +175,28 @@ def remove_user(site: Site, user: User):
 @command
 @must_be_root
 def create(site: str):
-    manual(f'go to Gandi.net, create A and AAAA records for {site}')
 
-    while True:
-        try:
-            print(f'waiting for DNS for {site}... ', end='')
-            socket.gethostbyname(site)
-            print('done.')
-            break
-        except socket.gaierror:
-            print('retry in 10s.')
-            time.sleep(10)
-    print()
+    my_ip_addrs = ip_addrs()
+    print(f'waiting for DNS for {site}... ', end='')
+    remote_ip = socket.gethostbyname(site)
+    if remote_ip in my_ip_addrs:
+        print('done.')
+    else:
+        print(f'points at {remote_ip}, not me.')
+        manual(f'go to Gandi.net, create A and AAAA records for {site}')
+        while True:
+            try:
+                print(f'waiting for DNS for {site}... ', end='')
+                remote_ip = socket.gethostbyname(site)
+                if remote_ip in my_ip_addrs:
+                    print('done.')
+                    break
+                print('retry in 10s')
+                time.sleep(10)
+            except socket.gaierror:
+                print('retry in 10s.')
+                time.sleep(10)
+        print()
 
     if not path.isdir(path.join(HTDOCS, site)):
         os.mkdir(path.join(HTDOCS, site))
